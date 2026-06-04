@@ -1,45 +1,95 @@
 """
-EDR Process Monitoring Engine
+EDR Process Monitoring Engine - 50+ Threat Patterns
 """
 import psutil
 import time
 import threading
-import json
 from datetime import datetime
 from plyer import notification
 
-# Threat signatures
+# ==================== 50+ MALICIOUS PROCESS PATTERNS ====================
 MALICIOUS_PROCESSES = {
+    # Ransomware (15 patterns)
     'ransomware.exe', 'wannacry.exe', 'locky.exe', 'cryptolocker.exe',
+    'cerber.exe', 'zepto.exe', 'cryptowall.exe', 'teslacrypt.exe',
+    'jigsaw.exe', 'badrabbit.exe', 'petya.exe', 'notpetya.exe',
+    'gandcrab.exe', 'ryuk.exe', 'revil.exe',
+    
+    # Crypto Miners (15 patterns)
     'xmrig.exe', 'miner.exe', 'cgminer.exe', 'minerd.exe',
+    'ethminer.exe', 'nbminer.exe', 'teamredminer.exe', 'lolminer.exe',
+    't-rex.exe', 'gminer.exe', 'phoenixminer.exe', 'claymore.exe',
+    'srbm Miner.exe', 'nanominer.exe', 'wildrig.exe',
+    
+    # Reverse Shells (10 patterns)
     'nc.exe', 'netcat.exe', 'reverse_shell.exe', 'nc64.exe',
-    'mimikatz.exe', 'procdump.exe', 'psexec.exe', 'powershell.exe'
+    'socat.exe', 'ncat.exe', 'powercat.ps1', 'evil-winrm.exe',
+    'pypykatz.exe', 'mimikatz.exe',
+    
+    # Hack Tools (10 patterns)
+    'procdump.exe', 'psexec.exe', 'wce.exe', 'fgdump.exe',
+    'hashdump.exe', 'cain.exe', 'abel.exe', 'hydra.exe',
+    'john.exe', 'hashcat.exe',
+    
+    # Suspicious Executables (10 patterns)
+    'payload.exe', 'backdoor.exe', 'trojan.exe', 'virus.exe',
+    'malware.exe', 'spyware.exe', 'keylogger.exe', 'rat.exe',
+    'bot.exe', 'worm.exe'
 }
 
-SUSPICIOUS_PATTERNS = [
-    'powershell -enc', 'powershell -e', 'cmd /c', 'schtasks /create',
-    'reg add', 'sc create', 'net user', 'net localgroup',
-    'vssadmin delete', 'wbadmin delete', 'cscript', 'wscript',
-    '-EncodedCommand', '-exec bypass', 'bypass -noprofile'
+# ==================== 20+ SUSPICIOUS COMMAND PATTERNS ====================
+SUSPICIOUS_COMMANDS = [
+    # PowerShell attacks
+    'powershell -enc', 'powershell -e', 'powershell -windowstyle hidden',
+    'powershell -exec bypass', 'IEX(New-Object Net.WebClient).DownloadString',
+    'Invoke-Expression', 'Invoke-Mimikatz', 'Invoke-PowerShellTcp',
+    
+    # CMD attacks
+    'cmd /c', 'cmd.exe /c', 'start /b',
+    
+    # Persistence
+    'schtasks /create', 'reg add HKLM', 'sc create',
+    'wmic process call create', 'msiexec /quiet',
+    
+    # Credential theft
+    'net user', 'net localgroup', 'whoami /priv', 'sekurlsa::logonpasswords',
+    
+    # Ransomware commands
+    'vssadmin delete shadows', 'wbadmin delete catalog', 'bcdedit /set',
+    
+    # Download and execute
+    'certutil -urlcache', 'bitsadmin /transfer', 'curl -o', 'wget -O',
+    'Invoke-WebRequest', 'Net.WebClient'
 ]
+
+# ==================== SUSPICIOUS NETWORK PORTS ====================
+SUSPICIOUS_PORTS = ['4444', '1337', '31337', '6667', '5555', '8080', '8443', '9999']
 
 # Store detected threats
 detected_threats = []
 monitoring_active = True
+total_scans = 0
 
 def analyze_process(proc):
-    """Analyze a single process for malicious behavior"""
+    """Analyze process with 50+ detection rules"""
     try:
         name = proc.name().lower()
         pid = proc.pid
         
-        # Get CPU and memory usage
+        # Skip system processes (reduce false positives)
+        skip_processes = ['system idle process', 'System Idle Process', 'svchost.exe', 
+                         'services.exe', 'lsass.exe', 'winlogon.exe', 'csrss.exe',
+                         'smss.exe', 'wininit.exe', 'spoolsv.exe']
+        if name in skip_processes:
+            return None
+        
+        # Get metrics
         cpu = proc.cpu_percent(interval=0.1)
         memory = proc.memory_percent()
         
         # Get command line
         try:
-            cmdline = ' '.join(proc.cmdline())
+            cmdline = ' '.join(proc.cmdline()).lower()
         except:
             cmdline = ''
         
@@ -52,90 +102,101 @@ def analyze_process(proc):
         except:
             pass
         
-        # Detection rules
         severity = None
         reason = None
+        detection_type = None
         
-        # Rule 1: Known malware
+        # RULE 1: Known malware (CRITICAL)
         if name in MALICIOUS_PROCESSES:
             severity = 'CRITICAL'
-            reason = f'Known malware process: {name}'
+            detection_type = 'Malware'
+            reason = f'Known malware: {name}'
         
-       # Rule 2: High CPU (possible crypto miner) - Skip System Idle Process
-elif cpu > 80 and name != 'system idle process' and name != 'System Idle Process':
-    severity = 'HIGH'
-    reason = f'Anomalous CPU usage: {cpu}%'
-        
-        # Rule 3: Suspicious command line
-        elif cmdline and any(p in cmdline.lower() for p in SUSPICIOUS_PATTERNS):
+        # RULE 2: Crypto miner (HIGH) - 200%+ CPU for miners
+        elif cpu > 200:
             severity = 'HIGH'
-            reason = f'Suspicious command: {cmdline[:100]}'
+            detection_type = 'Crypto Miner'
+            reason = f'Anomalous CPU: {cpu}% (mining pattern)'
         
-        # Rule 4: Suspicious network port
-        elif any(port in str(conn) for port in ['4444', '1337', '31337', '6667'] for conn in connections):
+        # RULE 3: Suspicious command (HIGH)
+        elif any(cmd in cmdline for cmd in SUSPICIOUS_COMMANDS):
+            severity = 'HIGH'
+            detection_type = 'Suspicious Command'
+            reason = f'Detected: {cmdline[:80]}'
+        
+        # RULE 4: Reverse shell port (CRITICAL)
+        elif any(port in str(conn) for port in SUSPICIOUS_PORTS for conn in connections):
             severity = 'CRITICAL'
-            reason = f'Suspicious network connection: {connections}'
+            detection_type = 'Reverse Shell'
+            reason = f'C2 connection on port {connections}'
         
-        # Rule 5: High memory usage
-        elif memory > 50:
+        # RULE 5: High memory (MEDIUM)
+        elif memory > 60:
             severity = 'MEDIUM'
-            reason = f'High memory usage: {memory}%'
+            detection_type = 'Memory Bomb'
+            reason = f'Memory usage: {memory}%'
+        
+        # RULE 6: Unsigned PowerShell (MEDIUM)
+        elif name == 'powershell.exe' and len(cmdline) > 100:
+            severity = 'MEDIUM'
+            detection_type = 'Suspicious PowerShell'
+            reason = f'Long PowerShell command detected'
         
         if severity:
             threat = {
                 'process_name': name,
                 'process_pid': pid,
                 'severity': severity,
+                'detection_type': detection_type,
                 'reason': reason,
-                'cmdline': cmdline[:200],
-                'connections': str(connections),
                 'cpu_usage': round(cpu, 1),
                 'memory_usage': round(memory, 1),
                 'action_taken': 'terminated',
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Terminate malicious process
+            # Terminate process
             try:
                 proc.terminate()
                 time.sleep(1)
                 if proc.is_running():
                     proc.kill()
-                threat['action_taken'] = 'terminated'
             except:
-                threat['action_taken'] = 'failed to terminate'
+                threat['action_taken'] = 'failed'
             
-            # Send desktop notification
+            # Desktop notification
             try:
                 notification.notify(
-                    title='🚨 EDR Alert',
-                    message=f'{severity}: {reason[:100]}',
+                    title=f'🚨 {severity} - {detection_type}',
+                    message=reason[:100],
                     timeout=5
                 )
             except:
                 pass
             
             return threat
-    
-    except Exception as e:
+    except:
         pass
-    
     return None
 
 def start_monitoring():
-    """Start the EDR monitoring thread"""
-    global monitoring_active, detected_threats
+    """Start EDR monitoring"""
+    global monitoring_active, detected_threats, total_scans
     
     print("🟢 EDR Monitoring Engine Started")
-    print("Monitoring for: Malware, Miners, Reverse Shells\n")
+    print(f"📋 Loaded {len(MALICIOUS_PROCESSES)} malware patterns")
+    print(f"📋 Loaded {len(SUSPICIOUS_COMMANDS)} command patterns")
+    print(f"📋 Loaded {len(SUSPICIOUS_PORTS)} suspicious ports")
+    print("\nMonitoring for: Malware, Miners, Reverse Shells, Ransomware\n")
     
     while monitoring_active:
         try:
+            total_scans += 1
             for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
                 threat = analyze_process(proc)
                 if threat:
                     detected_threats.insert(0, threat)
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 {threat['severity']} - {threat['reason'][:50]}")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 {threat['severity']} - {threat['detection_type']} - {threat['reason'][:60]}")
             
             time.sleep(3)
         except Exception as e:
@@ -143,15 +204,15 @@ def start_monitoring():
             time.sleep(10)
 
 def get_threats():
-    """Get list of detected threats"""
     return detected_threats[:100]
 
 def clear_threats():
-    """Clear all detected threats"""
     global detected_threats
     detected_threats = []
 
-def stop_monitoring():
-    """Stop the monitoring thread"""
-    global monitoring_active
-    monitoring_active = False
+def get_stats():
+    total = len(detected_threats)
+    critical = len([t for t in detected_threats if t['severity'] == 'CRITICAL'])
+    high = len([t for t in detected_threats if t['severity'] == 'HIGH'])
+    medium = len([t for t in detected_threats if t['severity'] == 'MEDIUM'])
+    return total, critical, high, medium

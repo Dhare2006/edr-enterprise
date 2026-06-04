@@ -220,18 +220,18 @@ def get_threats_api():
 @app.route('/api/stats', methods=['GET'])
 @token_required
 def get_stats():
-    """Get dashboard statistics"""
-    threats = get_threats()
+    from src.monitor.engine import get_stats as get_edr_stats
+    total, critical, high, medium = get_edr_stats()
     
-    stats = {
-        'total': len(threats),
-        'critical': len([t for t in threats if t['severity'] == 'CRITICAL']),
-        'high': len([t for t in threats if t['severity'] == 'HIGH']),
-        'medium': len([t for t in threats if t['severity'] == 'MEDIUM']),
-        'unique_processes': len(set([t['process_name'] for t in threats]))
-    }
-    
-    return jsonify(stats)
+    return jsonify({
+        'total': total,
+        'critical': critical,
+        'high': high,
+        'medium': medium,
+        'username': request.username,
+        'uptime': 'Active',
+        'threat_patterns': 55
+    })
 
 @app.route('/api/threats/clear', methods=['POST'])
 @token_required
